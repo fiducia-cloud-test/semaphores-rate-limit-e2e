@@ -1,0 +1,8 @@
+[package]
+name = "rate-limit-config-canary"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+ores-rl-lib-core = { path = "../deps/ores-rl-lib-core", features = ["config-toml"] }
