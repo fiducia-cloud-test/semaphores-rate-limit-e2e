@@ -1,0 +1,57 @@
+name: durable semaphore fencing acceptance
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  semaphore-model:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+        with:
+          node-version: "22.22.1"
+      - name: Prove bounded semaphore capacity and fenced release
+        shell: bash
+        run: |
+          node <<'NODE'
+          const assert = require('node:assert/strict');
+
+          const capacity = 2;
+          let nextToken = 0;
+          const holders = new Map();
+          const acquire = holder => {
+            if (holders.has(holder)) return { acquired: true, token: holders.get(holder) };
+            if (holders.size >= capacity) return { acquired: false, token: null };
+            const token = ++nextToken;
+            holders.set(holder, token);
+            return { acquired: true, token };
+          };
+          const release = (holder, token) => {
+            if (holders.get(holder) !== token) return false;
+            holders.delete(holder);
+            return true;
+          };
+
+          const a = acquire('worker-a');
+          const b = acquire('worker-b');
+          assert.equal(a.acquired, true);
+          assert.equal(b.acquired, true);
+          assert.equal(holders.size, capacity);
+          assert.equal(acquire('worker-c').acquired, false, 'capacity must fail closed');
+          assert.equal(acquire('worker-a').token, a.token, 'duplicate acquire must be idempotent');
+          assert.equal(release('worker-a', a.token + 1), false, 'stale token cannot release a slot');
+          assert.equal(holders.size, capacity);
+          assert.equal(release('worker-a', a.token), true);
+          const c = acquire('worker-c');
+          assert.equal(c.acquired, true);
+          assert.ok(c.token > b.token, 'new grants use monotonic fencing tokens');
+          assert.equal(holders.size, capacity);
+          NODE
